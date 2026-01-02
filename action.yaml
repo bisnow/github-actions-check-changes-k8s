@@ -1,0 +1,110 @@
+name: 'Check for Changes (Build, K8s, CloudFormation)'
+description: 'Detects changes in build files, k8s manifests, and CloudFormation templates'
+inputs:
+  k8s-path:
+    description: 'Path pattern for k8s files (default: ^\.k8s/)'
+    required: false
+    default: '^\.k8s/'
+  cf-file:
+    description: 'CloudFormation file name to check (default: aws-resources.yaml)'
+    required: false
+    default: 'aws-resources\.yaml'
+  event-name:
+    description: 'GitHub event name (defaults to github.event_name)'
+    required: false
+    default: ''
+  event-before:
+    description: 'Git commit SHA before (defaults to github.event.before)'
+    required: false
+    default: ''
+  event-sha:
+    description: 'Git commit SHA (defaults to github.sha)'
+    required: false
+    default: ''
+
+outputs:
+  build_container:
+    description: 'Whether container should be built (true/false)'
+    value: ${{ steps.filter.outputs.build_container }}
+  k8s_changed:
+    description: 'Whether k8s files changed (true/false)'
+    value: ${{ steps.filter.outputs.k8s_changed }}
+  cf_changed:
+    description: 'Whether CloudFormation changed (true/false)'
+    value: ${{ steps.filter.outputs.cf_changed }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Checkout code
+      uses: actions/checkout@v5
+      with:
+        fetch-depth: 0
+
+    - name: Check for all changes
+      id: filter
+      run: |
+        event_name="${{ inputs.event-name }}"
+        if [ -z "$event_name" ]; then
+          event_name="${{ github.event_name }}"
+        fi
+        
+        event_before="${{ inputs.event-before }}"
+        if [ -z "$event_before" ]; then
+          event_before="${{ github.event.before }}"
+        fi
+        
+        event_sha="${{ inputs.event-sha }}"
+        if [ -z "$event_sha" ]; then
+          event_sha="${{ github.sha }}"
+        fi
+        
+        k8s_path="${{ inputs.k8s-path }}"
+        cf_file="${{ inputs.cf-file }}"
+        
+        # Check for build changes
+        echo "=== Change Detection Results ==="
+        
+        # Manual run: always run all jobs
+        if [[ "$event_name" == "workflow_dispatch" ]]; then
+          echo "Manual run: building container, deploying cloudformation, and updating k8s"
+          echo "Build changes: true"
+          echo "K8s changes: true"
+          echo "CloudFormation changes: true"
+          echo "build_container=true" >> $GITHUB_OUTPUT
+          echo "k8s_changed=true" >> $GITHUB_OUTPUT
+          echo "cf_changed=true" >> $GITHUB_OUTPUT
+        else
+          CHANGED=$(git diff --name-only "$event_before" "$event_sha" | grep -vE "^($k8s_path|k8s/|$cf_file$)" || true)
+          if [[ -n "$CHANGED" ]]; then
+            echo "build_container=true" >> $GITHUB_OUTPUT
+            echo "Build changes: true"
+          else
+            echo "build_container=false" >> $GITHUB_OUTPUT
+            echo "Build changes: false"
+          fi
+          
+          # Check for K8s changes
+          K8S_CHANGED=$(git diff --name-only "$event_before" "$event_sha" | grep -E "^$k8s_path" || true)
+          if [[ -n "$K8S_CHANGED" ]]; then
+            echo "k8s_changed=true" >> $GITHUB_OUTPUT
+            echo "K8s changes: true"
+          else
+            echo "k8s_changed=false" >> $GITHUB_OUTPUT
+            echo "K8s changes: false"
+          fi
+          
+          # Check for CloudFormation changes
+          CF_CHANGED=$(git diff --name-only "$event_before" "$event_sha" | grep -E "($cf_file)" || true)
+          if [[ -n "$CF_CHANGED" ]]; then
+            echo "cf_changed=true" >> $GITHUB_OUTPUT
+            echo "CloudFormation changes: true"
+          else
+            echo "cf_changed=false" >> $GITHUB_OUTPUT
+            echo "CloudFormation changes: false"
+          fi
+        fi
+        
+        echo "================================"
+      shell: bash
+
