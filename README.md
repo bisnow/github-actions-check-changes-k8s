@@ -15,8 +15,8 @@ On manual runs (`workflow_dispatch`), all outputs are set to `true`.
 
 | Input | Description | Default |
 |-------|-------------|---------|
-| `k8s-path` | Path pattern for k8s files | `^\.k8s/` |
-| `cf-file` | CloudFormation file name | `aws-resources\.yaml` |
+| `k8s-path` | Path pattern for k8s files | `.k8s/` |
+| `cf-file` | CloudFormation file name | `aws-resources.yaml` |
 | `event-name` | GitHub event name | `github.event_name` |
 | `event-before` | Git commit SHA before | `github.event.before` |
 | `event-sha` | Git commit SHA | `github.sha` |

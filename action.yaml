@@ -2,13 +2,13 @@ name: 'Check for Changes (Build, K8s, CloudFormation)'
 description: 'Detects changes in build files, k8s manifests, and CloudFormation templates'
 inputs:
   k8s-path:
-    description: 'Path pattern for k8s files (default: ^\.k8s/)'
+    description: 'Path pattern for k8s files (default: .k8s/)'
     required: false
-    default: '^\.k8s/'
+    default: '.k8s/'
   cf-file:
     description: 'CloudFormation file name to check (default: aws-resources.yaml)'
     required: false
-    default: 'aws-resources\.yaml'
+    default: 'aws-resources.yaml'
   event-name:
     description: 'GitHub event name (defaults to github.event_name)'
     required: false
@@ -43,68 +43,102 @@ runs:
 
     - name: Check for all changes
       id: filter
+      shell: bash
       run: |
+        set -euo pipefail
+
+        # Get event parameters with fallbacks
         event_name="${{ inputs.event-name }}"
-        if [ -z "$event_name" ]; then
-          event_name="${{ github.event_name }}"
-        fi
-        
+        [ -z "$event_name" ] && event_name="${{ github.event_name }}"
+
         event_before="${{ inputs.event-before }}"
-        if [ -z "$event_before" ]; then
-          event_before="${{ github.event.before }}"
-        fi
-        
+        [ -z "$event_before" ] && event_before="${{ github.event.before }}"
+
         event_sha="${{ inputs.event-sha }}"
-        if [ -z "$event_sha" ]; then
-          event_sha="${{ github.sha }}"
-        fi
-        
+        [ -z "$event_sha" ] && event_sha="${{ github.sha }}"
+
         k8s_path="${{ inputs.k8s-path }}"
         cf_file="${{ inputs.cf-file }}"
-        
-        # Check for build changes
+
         echo "=== Change Detection Results ==="
-        
-        # Manual run: always run all jobs
-        if [[ "$event_name" == "workflow_dispatch" ]]; then
-          echo "Manual run: building container, deploying cloudformation, and updating k8s"
-          echo "Build changes: true"
-          echo "K8s changes: true"
-          echo "CloudFormation changes: true"
+        echo "Event: $event_name"
+        echo "Comparing: $event_before...$event_sha"
+        echo ""
+
+        # Enable all jobs for manual runs or when we can't determine changes
+        if [[ "$event_name" == "workflow_dispatch" ]] || [[ -z "$event_before" ]] || [[ "$event_before" =~ ^0+$ ]]; then
+          if [[ "$event_name" == "workflow_dispatch" ]]; then
+            echo "Manual run detected - enabling all jobs"
+          else
+            echo "First commit or invalid before SHA - enabling all jobs"
+          fi
           echo "build_container=true" >> $GITHUB_OUTPUT
           echo "k8s_changed=true" >> $GITHUB_OUTPUT
           echo "cf_changed=true" >> $GITHUB_OUTPUT
-        else
-          CHANGED=$(git diff --name-only "$event_before" "$event_sha" | grep -vE "^($k8s_path|k8s/|$cf_file$)" || true)
-          if [[ -n "$CHANGED" ]]; then
-            echo "build_container=true" >> $GITHUB_OUTPUT
-            echo "Build changes: true"
-          else
-            echo "build_container=false" >> $GITHUB_OUTPUT
-            echo "Build changes: false"
-          fi
-          
-          # Check for K8s changes
-          K8S_CHANGED=$(git diff --name-only "$event_before" "$event_sha" | grep -E "^$k8s_path" || true)
-          if [[ -n "$K8S_CHANGED" ]]; then
-            echo "k8s_changed=true" >> $GITHUB_OUTPUT
-            echo "K8s changes: true"
-          else
-            echo "k8s_changed=false" >> $GITHUB_OUTPUT
-            echo "K8s changes: false"
-          fi
-          
-          # Check for CloudFormation changes
-          CF_CHANGED=$(git diff --name-only "$event_before" "$event_sha" | grep -E "($cf_file)" || true)
-          if [[ -n "$CF_CHANGED" ]]; then
-            echo "cf_changed=true" >> $GITHUB_OUTPUT
-            echo "CloudFormation changes: true"
-          else
-            echo "cf_changed=false" >> $GITHUB_OUTPUT
-            echo "CloudFormation changes: false"
-          fi
+          echo "  Build container: true"
+          echo "  K8s changed: true"
+          echo "  CloudFormation changed: true"
+          echo "================================"
+          exit 0
         fi
-        
+
+        # Get all changed files (run git diff once)
+        if ! ALL_FILES=$(git diff --name-only "$event_before" "$event_sha" 2>&1); then
+          echo "ERROR: git diff failed: $ALL_FILES"
+          echo "Enabling all jobs as fallback"
+          echo "build_container=true" >> $GITHUB_OUTPUT
+          echo "k8s_changed=true" >> $GITHUB_OUTPUT
+          echo "cf_changed=true" >> $GITHUB_OUTPUT
+          echo "================================"
+          exit 0
+        fi
+
+        # Debug: show all changed files
+        if [[ -n "$ALL_FILES" ]]; then
+          echo "Changed files:"
+          echo "$ALL_FILES" | sed 's/^/  /'
+          echo ""
+        else
+          echo "No files changed"
+          echo ""
+        fi
+
+        # Escape special regex characters in paths
+        k8s_pattern=$(echo "$k8s_path" | sed 's/\./\\./g')
+        cf_pattern=$(echo "$cf_file" | sed 's/\./\\./g')
+
+        # Check for K8s changes
+        K8S_FILES=$(echo "$ALL_FILES" | grep -E "^${k8s_pattern}" || true)
+        if [[ -n "$K8S_FILES" ]]; then
+          echo "k8s_changed=true" >> $GITHUB_OUTPUT
+          echo "  K8s changed: true"
+          echo "$K8S_FILES" | sed 's/^/    - /'
+        else
+          echo "k8s_changed=false" >> $GITHUB_OUTPUT
+          echo "  K8s changed: false"
+        fi
+
+        # Check for CloudFormation changes (match filename exactly)
+        CF_FILES=$(echo "$ALL_FILES" | grep -E "(^|/)${cf_pattern}$" || true)
+        if [[ -n "$CF_FILES" ]]; then
+          echo "cf_changed=true" >> $GITHUB_OUTPUT
+          echo "  CloudFormation changed: true"
+          echo "$CF_FILES" | sed 's/^/    - /'
+        else
+          echo "cf_changed=false" >> $GITHUB_OUTPUT
+          echo "  CloudFormation changed: false"
+        fi
+
+        # Check for build changes (anything NOT k8s or CloudFormation)
+        BUILD_FILES=$(echo "$ALL_FILES" | grep -vE "^${k8s_pattern}" | grep -vE "(^|/)${cf_pattern}$" || true)
+        if [[ -n "$BUILD_FILES" ]]; then
+          echo "build_container=true" >> $GITHUB_OUTPUT
+          echo "  Build container: true"
+          echo "$BUILD_FILES" | sed 's/^/    - /'
+        else
+          echo "build_container=false" >> $GITHUB_OUTPUT
+          echo "  Build container: false"
+        fi
+
         echo "================================"
-      shell: bash
 
