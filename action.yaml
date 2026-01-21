@@ -46,6 +46,17 @@ runs:
       shell: bash
       run: |
         set -euo pipefail
+        
+        # Check if triggered by a bot
+        if [[ "${{ github.actor }}" == *"[bot]"* ]]; then
+          echo "=== Bot Detected: Skipping All Checks ==="
+          echo "Triggered by bot (${{ github.actor }}), skipping to prevent infinite loops"
+          echo "build_container=false" >> $GITHUB_OUTPUT
+          echo "k8s_changed=false" >> $GITHUB_OUTPUT
+          echo "cf_changed=false" >> $GITHUB_OUTPUT
+          echo "================================"
+          exit 0
+        fi
 
         # Get event parameters with fallbacks
         event_name="${{ inputs.event-name }}"
