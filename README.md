@@ -45,3 +45,12 @@ jobs:
         id: check
         uses: bisnow/github-actions-check-changes-k8s@main
 ```
+
+## Versioning
+
+This action uses rolling major version tags. You can pin to:
+
+- A specific version: `@v3.1.0` (exact, never changes)
+- A major version: `@v3` (recommended, gets bug fixes and new features)
+
+When a new semantic version tag (e.g., `v3.2.0`) is pushed, a GitHub Actions workflow automatically updates the corresponding major version tag (`v3`) to point to the new release.
