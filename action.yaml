@@ -32,6 +32,9 @@ outputs:
   cf_changed:
     description: 'Whether CloudFormation changed (true/false)'
     value: ${{ steps.filter.outputs.cf_changed }}
+  config_changed:
+    description: 'Whether ConfigMap or SealedSecret files changed (true/false)'
+    value: ${{ steps.filter.outputs.config_changed }}
 
 runs:
   using: 'composite'
@@ -75,9 +78,11 @@ runs:
           echo "build_container=true" >> $GITHUB_OUTPUT
           echo "k8s_changed=true" >> $GITHUB_OUTPUT
           echo "cf_changed=true" >> $GITHUB_OUTPUT
+          echo "config_changed=true" >> $GITHUB_OUTPUT
           echo "  Build container: true"
           echo "  K8s changed: true"
           echo "  CloudFormation changed: true"
+          echo "  Config changed: true"
           echo "================================"
           exit 0
         fi
@@ -89,6 +94,7 @@ runs:
           echo "build_container=true" >> $GITHUB_OUTPUT
           echo "k8s_changed=true" >> $GITHUB_OUTPUT
           echo "cf_changed=true" >> $GITHUB_OUTPUT
+          echo "config_changed=true" >> $GITHUB_OUTPUT
           echo "================================"
           exit 0
         fi
@@ -129,6 +135,18 @@ runs:
           echo "  CloudFormation changed: false"
         fi
 
+        # Check for ConfigMap/Secret changes in non-prod (files containing "configmap" or "secret")
+        # Only check non-prod since that's what gets auto-deployed; prod deploys are manual
+        CONFIG_FILES=$(echo "$ALL_FILES" | grep -E "^${k8s_pattern}non-prod/.*(configmap|secret).*\.yaml$" || true)
+        if [[ -n "$CONFIG_FILES" ]]; then
+          echo "config_changed=true" >> $GITHUB_OUTPUT
+          echo "  Config changed: true"
+          echo "$CONFIG_FILES" | sed 's/^/    - /'
+        else
+          echo "config_changed=false" >> $GITHUB_OUTPUT
+          echo "  Config changed: false"
+        fi
+
         # Check for build changes (anything NOT k8s or CloudFormation)
         BUILD_FILES=$(echo "$ALL_FILES" | grep -vE "^${k8s_pattern}" | grep -vE "(^|/)${cf_pattern}$" || true)
         if [[ -n "$BUILD_FILES" ]]; then
@@ -141,4 +159,3 @@ runs:
         fi
 
         echo "================================"
-
