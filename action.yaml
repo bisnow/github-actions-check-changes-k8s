@@ -32,6 +32,12 @@ outputs:
   cf_changed:
     description: 'Whether CloudFormation changed (true/false)'
     value: ${{ steps.filter.outputs.cf_changed }}
+  config_changed_non_prod:
+    description: 'Whether non-prod ConfigMap or SealedSecret files changed (true/false)'
+    value: ${{ steps.filter.outputs.config_changed_non_prod }}
+  config_changed_prod:
+    description: 'Whether prod ConfigMap or SealedSecret files changed (true/false)'
+    value: ${{ steps.filter.outputs.config_changed_prod }}
 
 runs:
   using: 'composite'
@@ -75,9 +81,13 @@ runs:
           echo "build_container=true" >> $GITHUB_OUTPUT
           echo "k8s_changed=true" >> $GITHUB_OUTPUT
           echo "cf_changed=true" >> $GITHUB_OUTPUT
+          echo "config_changed_non_prod=true" >> $GITHUB_OUTPUT
+          echo "config_changed_prod=true" >> $GITHUB_OUTPUT
           echo "  Build container: true"
           echo "  K8s changed: true"
           echo "  CloudFormation changed: true"
+          echo "  Config changed (non-prod): true"
+          echo "  Config changed (prod): true"
           echo "================================"
           exit 0
         fi
@@ -89,6 +99,8 @@ runs:
           echo "build_container=true" >> $GITHUB_OUTPUT
           echo "k8s_changed=true" >> $GITHUB_OUTPUT
           echo "cf_changed=true" >> $GITHUB_OUTPUT
+          echo "config_changed_non_prod=true" >> $GITHUB_OUTPUT
+          echo "config_changed_prod=true" >> $GITHUB_OUTPUT
           echo "================================"
           exit 0
         fi
@@ -129,6 +141,28 @@ runs:
           echo "  CloudFormation changed: false"
         fi
 
+        # Check for ConfigMap/Secret changes in non-prod (files containing "configmap" or "secret")
+        CONFIG_FILES_NON_PROD=$(echo "$ALL_FILES" | grep -E "^${k8s_pattern}non-prod/.*(configmap|secret).*\.yaml$" || true)
+        if [[ -n "$CONFIG_FILES_NON_PROD" ]]; then
+          echo "config_changed_non_prod=true" >> $GITHUB_OUTPUT
+          echo "  Config changed (non-prod): true"
+          echo "$CONFIG_FILES_NON_PROD" | sed 's/^/    - /'
+        else
+          echo "config_changed_non_prod=false" >> $GITHUB_OUTPUT
+          echo "  Config changed (non-prod): false"
+        fi
+
+        # Check for ConfigMap/Secret changes in prod (files containing "configmap" or "secret")
+        CONFIG_FILES_PROD=$(echo "$ALL_FILES" | grep -E "^${k8s_pattern}prod/.*(configmap|secret).*\.yaml$" || true)
+        if [[ -n "$CONFIG_FILES_PROD" ]]; then
+          echo "config_changed_prod=true" >> $GITHUB_OUTPUT
+          echo "  Config changed (prod): true"
+          echo "$CONFIG_FILES_PROD" | sed 's/^/    - /'
+        else
+          echo "config_changed_prod=false" >> $GITHUB_OUTPUT
+          echo "  Config changed (prod): false"
+        fi
+
         # Check for build changes (anything NOT k8s or CloudFormation)
         BUILD_FILES=$(echo "$ALL_FILES" | grep -vE "^${k8s_pattern}" | grep -vE "(^|/)${cf_pattern}$" || true)
         if [[ -n "$BUILD_FILES" ]]; then
@@ -141,4 +175,3 @@ runs:
         fi
 
         echo "================================"
-
