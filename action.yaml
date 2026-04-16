@@ -21,6 +21,14 @@ inputs:
     description: 'Git commit SHA (defaults to github.sha)'
     required: false
     default: ''
+  event-action:
+    description: 'GitHub event action (defaults to github.event.action)'
+    required: false
+    default: ''
+  pr-stack-label:
+    description: 'Label name that triggers initial PR stack deploy (defaults to pr-stack)'
+    required: false
+    default: 'pr-stack'
 
 outputs:
   build_container:
@@ -66,10 +74,29 @@ runs:
         k8s_path="${{ inputs.k8s-path }}"
         cf_file="${{ inputs.cf-file }}"
 
+        event_action="${{ inputs.event-action }}"
+        [ -z "$event_action" ] && event_action="${{ github.event.action }}"
+
+        pr_stack_label="${{ inputs.pr-stack-label }}"
+
         echo "=== Change Detection Results ==="
         echo "Event: $event_name"
         echo "Comparing: $event_before...$event_sha"
         echo ""
+
+        # Enable build and CF for the initial PR stack deploy (pr-stack label first applied)
+        if [[ "$event_name" == "pull_request" && "$event_action" == "labeled" && "${{ github.event.label.name }}" == "$pr_stack_label" ]]; then
+          echo "Initial PR stack deploy detected (label: $pr_stack_label) - enabling build and CloudFormation"
+          echo "build_container=true" >> $GITHUB_OUTPUT
+          echo "k8s_changed=false" >> $GITHUB_OUTPUT
+          echo "cf_changed=true" >> $GITHUB_OUTPUT
+          echo "config_changed_non_prod=false" >> $GITHUB_OUTPUT
+          echo "config_changed_prod=false" >> $GITHUB_OUTPUT
+          echo "  Build container: true"
+          echo "  CloudFormation changed: true"
+          echo "================================"
+          exit 0
+        fi
 
         # Enable all jobs for manual runs or when we can't determine changes
         if [[ "$event_name" == "workflow_dispatch" ]] || [[ -z "$event_before" ]] || [[ "$event_before" =~ ^0+$ ]]; then
